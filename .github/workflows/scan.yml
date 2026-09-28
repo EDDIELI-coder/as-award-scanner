@@ -15,7 +15,8 @@ on:
         type: string
         default: ''
 
-permissions: {}
+permissions:
+  actions: write
 
 concurrency:
   group: scan
@@ -91,6 +92,12 @@ jobs:
           curl -sS --fail -X POST -H "Authorization: Bearer $DATA_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$PRIVATE_REPO/dispatches" \
             -d '{"event_type":"scan-done"}' && echo "已通知"
+
+      - name: 保持排程啟用
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/scan.yml/enable" && echo "排程保持啟用"
 
       - name: 失敗時通知私人 repo（傳 Telegram）
         if: failure()
