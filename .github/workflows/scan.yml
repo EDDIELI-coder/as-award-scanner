@@ -14,9 +14,14 @@ on:
         description: 留空＝照排程；或指定模式（逗號分隔）：near, daily, fsweep, firstfar, weekly, business, japan, census, smoke
         type: string
         default: ''
+      human_handoff:
+        description: 僅本次手動人工接手（須已有網站阻擋紀錄，最多等待 10 分鐘）
+        type: boolean
+        default: false
 
 permissions:
   actions: write
+  id-token: write
 
 concurrency:
   group: scan
@@ -31,6 +36,7 @@ jobs:
     timeout-minutes: 330
     env:
       TZ: Asia/Taipei
+      HANDOFF_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.human_handoff == true && '1' || '0' }}
     steps:
       - name: 取得掃描程式（私人 repo main）
         uses: actions/checkout@v4
