@@ -86,7 +86,11 @@ jobs:
           # 私人 repo 的通知流程也會寫 award-data（不同檔案），衝突時重抓再推
           for i in 1 2 3 4; do
             git push -q origin HEAD:award-data && exit 0
-            sleep $((i * 5)); git pull -q --rebase origin award-data
+            sleep $((i * 5))
+            if ! git pull -q --rebase origin award-data; then
+              python ../src/jx_fares/reconcile_scan_state.py
+              GIT_EDITOR=true git rebase --continue
+            fi
           done
           exit 1
 
