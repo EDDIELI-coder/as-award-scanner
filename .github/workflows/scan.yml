@@ -14,6 +14,10 @@ on:
         description: 留空＝照排程；或指定模式（逗號分隔）：near, daily, fsweep, firstfar, weekly, business, japan, census, smoke
         type: string
         default: ''
+      cooldown_retry_until:
+        description: 由備援服務填入的冷卻到期時間；排隊期間若已補查則略過
+        type: string
+        default: ''
       human_handoff:
         description: 僅本次手動人工接手（須已有網站阻擋紀錄，最多等待 10 分鐘）
         type: boolean
@@ -36,6 +40,7 @@ jobs:
     timeout-minutes: 330
     env:
       TZ: Asia/Taipei
+      COOLDOWN_RETRY_UNTIL: ${{ inputs.cooldown_retry_until }}
       HANDOFF_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.human_handoff == true && '1' || '0' }}
     steps:
       - name: 取得掃描程式（私人 repo main）
@@ -47,6 +52,7 @@ jobs:
           persist-credentials: false
 
       - name: 取得資料（私人 repo award-data）
+        id: data
         uses: actions/checkout@v4
         with:
           repository: ${{ env.PRIVATE_REPO }}
@@ -64,6 +70,7 @@ jobs:
           python -m playwright install --with-deps chromium > /dev/null
 
       - name: 掃描
+        id: scan
         working-directory: data
         env:
           MODE: ${{ inputs.mode }}
@@ -74,7 +81,8 @@ jobs:
           exit ${rc:-0}
 
       - name: 存回私人 repo
-        if: ${{ !contains(inputs.mode, 'smoke') }}
+        id: save
+        if: ${{ always() && steps.data.outcome == 'success' && (steps.scan.outcome == 'success' || steps.scan.outcome == 'failure') && !contains(inputs.mode, 'smoke') }}
         working-directory: data
         run: |
           git config user.name "award-bot"
@@ -95,6 +103,7 @@ jobs:
           exit 1
 
       - name: 通知私人 repo 處理（快查頁、新位子、Telegram）
+        id: notify
         if: ${{ !contains(inputs.mode, 'smoke') }}
         env:
           DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
@@ -114,7 +123,8 @@ jobs:
         env:
           DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FAILURE_STAGE: ${{ steps.save.outcome == 'failure' && 'save' || steps.scan.outcome == 'failure' && 'scan' || steps.notify.outcome == 'failure' && 'dispatch' || 'setup' }}
         run: |
           curl -sS -X POST -H "Authorization: Bearer $DATA_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$PRIVATE_REPO/dispatches" \
-            -d "{\"event_type\":\"scan-failed\",\"client_payload\":{\"url\":\"$RUN_URL\"}}" > /dev/null || true
+            -d "{\"event_type\":\"scan-failed\",\"client_payload\":{\"url\":\"$RUN_URL\",\"stage\":\"$FAILURE_STAGE\"}}" > /dev/null || true
