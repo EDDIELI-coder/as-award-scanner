@@ -18,6 +18,10 @@ on:
         description: 由備援服務填入的冷卻到期時間；排隊期間若已補查則略過
         type: string
         default: ''
+      continuation_id:
+        description: 由接續服務填入的批次識別碼
+        type: string
+        default: ''
       human_handoff:
         description: 僅本次手動人工接手（須已有網站阻擋紀錄，最多等待 10 分鐘）
         type: boolean
@@ -40,6 +44,7 @@ jobs:
     timeout-minutes: 330
     env:
       TZ: Asia/Taipei
+      CONTINUATION_ID: ${{ inputs.continuation_id }}
       COOLDOWN_RETRY_UNTIL: ${{ inputs.cooldown_retry_until }}
       HANDOFF_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.human_handoff == true && '1' || '0' }}
     steps:
