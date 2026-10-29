@@ -1,0 +1,94 @@
+name: 星宇每月現金價
+
+on:
+  schedule:
+    # 每日台灣時間 03:33 檢查；8 日起每月成功更新一次。
+    # 未完成最多三次，網站阻擋至少等 48 小時；已完成時不呼叫星宇。
+    - cron: '33 19 * * *'
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: 僅核對大阪下個月頭等（最多三次請求）
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cash.yml']
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: starlux-cash
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPO: EDDIELI-coder/claude--
+  TZ: Asia/Taipei
+
+jobs:
+  cash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 145
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PRIVATE_REPO }}
+          ref: main
+          token: ${{ secrets.DATA_TOKEN }}
+          path: src
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        id: data
+        with:
+          repository: ${{ env.PRIVATE_REPO }}
+          ref: award-data
+          token: ${{ secrets.DATA_TOKEN }}
+          path: data
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q requests
+      - name: 更新星宇現金價（獨立於 Alaska）
+        id: cash
+        working-directory: data
+        env:
+          SAMPLE: ${{ github.event_name == 'push' || inputs.sample == true }}
+        run: |
+          args=()
+          if [ "$SAMPLE" = "true" ]; then args+=(--sample); fi
+          python ../src/jx_fares/monthly_cash.py "${args[@]}" > cash_log.txt 2>&1 || rc=$?
+          grep '^\[現金價\]' cash_log.txt || true
+          exit ${rc:-0}
+      - name: 保存已完成部分與待查進度
+        id: save
+        if: ${{ always() && steps.data.outcome == 'success' && (steps.cash.outcome == 'success' || steps.cash.outcome == 'failure') }}
+        working-directory: data
+        run: |
+          git config user.name "award-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in jx_cash_fares.json jx_cash_fares.md jx_cash_state.json cash_log.txt; do
+            [ ! -f "$f" ] || git add "$f"
+          done
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -q -m "星宇現金價 $(date '+%Y-%m-%d %H:%M')"
+          for i in 1 2 3 4; do
+            if git push -q origin HEAD:award-data; then
+              echo 'changed=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep $((i * 5))
+            git pull -q --rebase origin award-data || exit 1
+          done
+          exit 1
+      - name: 更新快查頁
+        if: ${{ always() && steps.save.outcome == 'success' && steps.save.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.DATA_TOKEN }}
+        run: gh api -X POST "repos/$PRIVATE_REPO/dispatches" -f event_type=scan-done
+      - name: 保持排程啟用
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/cash.yml/enable"
