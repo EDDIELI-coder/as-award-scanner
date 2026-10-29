@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       sample:
-        description: 僅核對大阪下個月頭等（最多三次請求）
+        description: 僅核對大阪下個月去程頭等與來回參考價（最多三次請求）
         type: boolean
         default: false
   push:
