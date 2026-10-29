@@ -68,7 +68,7 @@ jobs:
         run: |
           git config user.name "award-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in jx_cash_fares.json jx_cash_fares.md jx_cash_state.json cash_log.txt; do
+          for f in jx_cash_fares.json jx_cash_fares.md jx_cash_state.json jx_cash_probe.json cash_log.txt; do
             [ ! -f "$f" ] || git add "$f"
           done
           if git diff --cached --quiet; then exit 0; fi
