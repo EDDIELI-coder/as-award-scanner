@@ -1,0 +1,32 @@
+name: 本機人工協助啟動（電腦直接驗證）
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/start-local-assisted.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: local-assisted-start
+  cancel-in-progress: false
+jobs:
+  start:
+    runs-on: [self-hosted, Windows, X64, as-home]
+    timeout-minutes: 5
+    steps:
+      - name: 原批次結束後，以本機已登入的 gh 啟動人工協助查詢
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & gh auth status 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Local GitHub login unavailable; no query was dispatched.' }
+          for ($i=0; $i -lt 12; $i++) {
+            $status = & gh api repos/EDDIELI-coder/as-award-scanner/actions/runs/42352901287 --jq .status
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot confirm old batch status; no query dispatched.' }
+            if ($status -eq 'completed') { break }
+            Start-Sleep -Seconds 5
+          }
+          if ($status -ne 'completed') { throw 'Old batch still active; no duplicate scan dispatched.' }
+          & gh workflow run scan.yml --repo EDDIELI-coder/as-award-scanner --ref main -f human_handoff=true -f executor=auto
+          if ($LASTEXITCODE -ne 0) { throw 'Assisted scan dispatch failed.' }
+          'Owner-requested assisted scan dispatched. Actual executor and data reads remain subject to job verification.'
