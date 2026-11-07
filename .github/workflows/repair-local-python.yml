@@ -1,0 +1,38 @@
+name: 修復家裡查票專用 Python（不查票）
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/repair-local-python.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: scan
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: [self-hosted, Windows, X64, as-home]
+    timeout-minutes: 15
+    steps:
+      - name: 以官方簽章套件修復使用者 Python 3.12，不改 PATH 與其他版本
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $installer = Join-Path $env:RUNNER_TEMP 'python-3.12.10-amd64.exe'
+          Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe' -OutFile $installer
+          $signature = Get-AuthenticodeSignature -FilePath $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
+            throw 'Official Python installer signature verification failed. Nothing installed.'
+          }
+          $arguments = '/quiet InstallAllUsers=0 Include_pip=1 Include_launcher=0 Include_test=0 PrependPath=0 Shortcuts=0 AssociateFiles=0'
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Python installer did not complete cleanly: $($process.ExitCode). No reboot requested." }
+          $python = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
+          $env:PYTHONHOME = $null
+          $env:PYTHONPATH = $null
+          & $python -c 'import sys, ctypes, pip; print(sys.executable); print(sys.version); assert sys.version_info[:2] == (3,12)'
+          if ($LASTEXITCODE -ne 0) { throw 'Native Python/ctypes validation failed. No scan was started.' }
+          & $python -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw 'pip validation failed. No scan was started.' }
+          'Python runtime validation completed; airline queries: 0.'
