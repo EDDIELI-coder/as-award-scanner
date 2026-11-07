@@ -1,0 +1,26 @@
+name: 只讀檢查舊備線存檔卡點
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/inspect-worker-save.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: [self-hosted, Windows, X64, as-home]
+    timeout-minutes: 3
+    steps:
+      - name: 只讀備線工作副本與程序狀態
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $data=Join-Path $env:LOCALAPPDATA 'AsAwardRunner\home\backup\_work\as-award-scanner-backup\as-award-scanner-backup\data'
+          if (!(Test-Path $data)) { throw 'Backup data checkout not found.' }
+          git -C $data status --porcelain
+          git -C $data diff --name-only --diff-filter=U
+          $status=Get-Content (Join-Path $data 'scan_status.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          $status | Select-Object github_run_id,github_run_attempt,runner_repo,run,finished_at,state,stop_reason,successful_reads | ConvertTo-Json -Compress
+          $live=Join-Path $data 'scan_live.json'
+          if (Test-Path $live) { Get-Content $live -Raw -Encoding UTF8 | ConvertFrom-Json | Select-Object state,stage,event_at,calendar_done,details_done,successful_reads,stop_reason | ConvertTo-Json -Compress }
+          Get-Process -Name git,git-remote-https,git-credential-manager,bash,sh -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,CPU,StartTime | ConvertTo-Json -Compress
