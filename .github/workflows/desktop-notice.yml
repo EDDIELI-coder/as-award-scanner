@@ -1,0 +1,32 @@
+name: Windows 桌面通知測試（不查票）
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/desktop-notice.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-notice-test
+  cancel-in-progress: false
+jobs:
+  desktop-notice:
+    runs-on: [self-hosted, Windows, X64, as-home]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: EDDIELI-coder/claude--
+          ref: main
+          token: ${{ secrets.DATA_TOKEN }}
+          persist-credentials: false
+      - name: 在家裡電腦提交一次測試提醒，不查航空網站
+        shell: powershell
+        run: |
+          $candidates = @('C:\Python314\python.exe', "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe", 'C:\Python312\python.exe')
+          $python = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$python) { throw 'No supported local Python found; no notification was requested.' }
+          & $python jx_fares/desktop_notice.py --test
+          if ($LASTEXITCODE -ne 0) { throw 'Notification test failed.' }
+          Start-Sleep -Seconds 22
+          'Notification request finished. Desktop visibility requires user confirmation; airline queries: 0.'
