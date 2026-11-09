@@ -28,7 +28,24 @@ env:
   TZ: Asia/Taipei
 
 jobs:
+  check:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PRIVATE_REPO }}
+          ref: main
+          token: ${{ secrets.DATA_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 部署只做離線測試，不查詢航空
+        run: python -m unittest discover -s jx_fares -p test_monthly_cash.py
   cash:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 145
     steps:
@@ -54,13 +71,28 @@ jobs:
         id: cash
         working-directory: data
         env:
-          SAMPLE: ${{ github.event_name == 'push' || inputs.sample == true }}
+          SAMPLE: ${{ inputs.sample == true }}
         run: |
           args=()
           if [ "$SAMPLE" = "true" ]; then args+=(--sample); fi
+          rc=0
           python ../src/jx_fares/monthly_cash.py "${args[@]}" > cash_log.txt 2>&1 || rc=$?
           grep '^\[現金價\]' cash_log.txt || true
-          exit ${rc:-0}
+          if [ "$rc" -eq 3 ] && [ "$SAMPLE" != "true" ]; then
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          state = json.loads(Path('jx_cash_state.json').read_text(encoding='utf-8'))
+          pending = state['last_run']['pending']
+          retry = state['retry_after']
+          print(f'::notice title=星宇現金價可接續::本輪達執行上限，待查 {pending} 項；{retry} 後依原排程補查。')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write(f'星宇現金價本輪達執行上限。待查 **{pending}** 項；**{retry}** 後依原排程補查。僅全部完成才結算本月。\n')
+          PY
+            exit 0
+          fi
+          exit "$rc"
       - name: 保存已完成部分與待查進度
         id: save
         if: ${{ always() && steps.data.outcome == 'success' && (steps.cash.outcome == 'success' || steps.cash.outcome == 'failure') }}
