@@ -1,0 +1,63 @@
+name: 更新本機背景啟動（不重啟、不查票）
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/update-background-runner.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: update-background-runner
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: [self-hosted, Windows, X64, as-home]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: EDDIELI-coder/claude--
+          ref: 1b190c4f9cdbdd2fc8a6ad9dda6280f011bb5e30
+          token: ${{ secrets.DATA_TOKEN }}
+          persist-credentials: false
+          path: quiet-source
+      - name: 實際確認子程序無可見命令列
+        shell: powershell
+        run: ./quiet-source/jx_fares/tools/Test-RunnerProcess.ps1
+      - name: 更新已安裝腳本，不動正在執行的工作
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=[IO.Path]::GetFullPath($env:LOCALAPPDATA)
+          $allowedPrefix=Join-Path $root 'AsAwardSetup'
+          $folders=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          $count=0
+          foreach ($part in @('primary','backup')) {
+            $task=Get-ScheduledTask -TaskName "AS-Award-home-$part" -ErrorAction Stop
+            if ($task.Actions.Count -ne 1 -or $task.Actions[0].Arguments -notmatch '(?i)-File\s+"([^"]+Start-LocalRunner\.ps1)"') {
+              throw 'Unexpected installed runner action; no task was changed.'
+            }
+            $launcher=[IO.Path]::GetFullPath($Matches[1])
+            if (!$launcher.StartsWith($allowedPrefix,[StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $launcher)) {
+              throw 'Installed script is outside the expected local setup directory.'
+            }
+            $folder=Split-Path $launcher
+            if ($folders.Add($folder)) {
+              foreach ($name in @('RunnerProcess.ps1','Start-LocalRunner.ps1')) {
+                $target=Join-Path $folder $name
+                $source=Join-Path $env:GITHUB_WORKSPACE ("quiet-source\jx_fares\tools\"+$name)
+                if ((Test-Path -LiteralPath $target) -and !(Test-Path -LiteralPath ($target+'.before-background'))) {
+                  Copy-Item -LiteralPath $target -Destination ($target+'.before-background')
+                }
+                $body=Get-Content -LiteralPath $source -Raw -Encoding UTF8
+                [IO.File]::WriteAllText($target,$body,[Text.UTF8Encoding]::new($true))
+                if ((Get-Content $target -Raw -Encoding UTF8).TrimStart([char]0xfeff) -ne $body.TrimStart([char]0xfeff)) {
+                  throw 'Installed background launcher did not match the tested source.'
+                }
+              }
+            }
+            $count++
+            Write-Host ("Updated installed script for "+$part+"; task remains "+$task.State+". No restart requested.")
+          }
+          if ($count -ne 2) { throw 'Both registered local runner tasks must be checked.' }
+          Write-Host 'PASS: both installed launchers updated; applies at next normal runner startup. Profiles, current scans and scheduled task definitions preserved.'
