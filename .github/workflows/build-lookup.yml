@@ -1,0 +1,64 @@
+name: 更新快查頁（公開 repo 免費建置）
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: award-lookup-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PRIVATE_REPO: EDDIELI-coder/claude--
+      TZ: Asia/Taipei
+      PYTHONUTF8: '1'
+    steps:
+      - name: 取得掃描程式（私人 repo main）
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PRIVATE_REPO }}
+          token: ${{ secrets.DATA_TOKEN }}
+          ref: main
+          path: src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 取得資料（私人 repo award-data）
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PRIVATE_REPO }}
+          token: ${{ secrets.DATA_TOKEN }}
+          ref: award-data
+          path: data
+
+      - name: 合併並更新快查頁
+        working-directory: data
+        run: |
+          git config user.name "award-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4; do
+            git fetch -q origin award-data
+            git reset --hard -q origin/award-data
+            python ../src/jx_fares/parallel_store.py project > /dev/null
+            python ../src/jx_fares/build_html.py --out award_lookup.html > /dev/null
+            python ../src/jx_fares/prepare_vercel.py --data . > /dev/null
+            for f in as_awards.json scan_state.json scan_status.json parallel_projection.json award_lookup.html summary.json package.json package-lock.json .vercel-ignore.sh vercel.json; do
+              [ -f "$f" ] && git add -- "$f"
+            done
+            for d in scan_results api lib; do
+              [ -d "$d" ] && git add -A -- "$d"
+            done
+            if git diff --cached --quiet; then
+              echo "快查頁無變動"
+              exit 0
+            fi
+            git commit -q -m "快查頁更新 $(date '+%Y-%m-%d %H:%M')"
+            git push -q origin HEAD:award-data && { echo "快查頁已更新"; exit 0; }
+            sleep $((i * 5))
+          done
+          exit 1
