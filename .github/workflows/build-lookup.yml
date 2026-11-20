@@ -3,6 +3,9 @@ name: 更新快查頁（公開 repo 免費建置）
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: award-lookup-build
   cancel-in-progress: false
@@ -17,32 +20,47 @@ jobs:
       PYTHONUTF8: '1'
     steps:
       - name: 取得掃描程式（私人 repo main）
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ env.PRIVATE_REPO }}
           token: ${{ secrets.DATA_TOKEN }}
           ref: main
           path: src
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
       - name: 取得資料（私人 repo award-data）
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ env.PRIVATE_REPO }}
           token: ${{ secrets.DATA_TOKEN }}
           ref: award-data
           path: data
+          persist-credentials: false
 
       - name: 合併並更新快查頁
         working-directory: data
+        env:
+          DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
         run: |
+          askpass=$(mktemp)
+          trap 'rm -f "$askpass"' EXIT
+          cat <<'EOF' > "$askpass"
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' "x-access-token" ;;
+            *) printf '%s\n' "$DATA_TOKEN" ;;
+          esac
+          EOF
+          chmod 700 "$askpass"
+          export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
           git config user.name "award-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3 4; do
-            git fetch -q origin award-data
+            git -c credential.helper= fetch -q origin award-data
             git reset --hard -q origin/award-data
             python ../src/jx_fares/parallel_store.py project > /dev/null
             python ../src/jx_fares/build_html.py --out award_lookup.html > /dev/null
@@ -58,7 +76,7 @@ jobs:
               exit 0
             fi
             git commit -q -m "快查頁更新 $(date '+%Y-%m-%d %H:%M')"
-            git push -q origin HEAD:award-data && { echo "快查頁已更新"; exit 0; }
+            git -c credential.helper= push -q origin HEAD:award-data && { echo "快查頁已更新"; exit 0; }
             sleep $((i * 5))
           done
           exit 1

@@ -33,13 +33,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ env.PRIVATE_REPO }}
           ref: main
           token: ${{ secrets.DATA_TOKEN }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: 部署只做離線測試，不查詢航空
@@ -49,21 +49,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 145
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ env.PRIVATE_REPO }}
           ref: main
           token: ${{ secrets.DATA_TOKEN }}
           path: src
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         id: data
         with:
           repository: ${{ env.PRIVATE_REPO }}
           ref: award-data
           token: ${{ secrets.DATA_TOKEN }}
           path: data
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - run: pip install -q requests
@@ -97,7 +98,22 @@ jobs:
         id: save
         if: ${{ always() && steps.data.outcome == 'success' && (steps.cash.outcome == 'success' || steps.cash.outcome == 'failure') }}
         working-directory: data
+        env:
+          DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
         run: |
+          askpass=$(mktemp)
+          trap 'rm -f "$askpass"' EXIT
+          cat <<'EOF' > "$askpass"
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s
+' "x-access-token" ;;
+            *) printf '%s
+' "$DATA_TOKEN" ;;
+          esac
+          EOF
+          chmod 700 "$askpass"
+          export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
           git config user.name "award-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for f in jx_cash_fares.json jx_cash_fares.md jx_cash_state.json jx_cash_probe.json cash_log.txt; do
@@ -106,12 +122,12 @@ jobs:
           if git diff --cached --quiet; then exit 0; fi
           git commit -q -m "星宇現金價 $(date '+%Y-%m-%d %H:%M')"
           for i in 1 2 3 4; do
-            if git push -q origin HEAD:award-data; then
+            if git -c credential.helper= push -q origin HEAD:award-data; then
               echo 'changed=true' >> "$GITHUB_OUTPUT"
               exit 0
             fi
             sleep $((i * 5))
-            git pull -q --rebase origin award-data || exit 1
+            git -c credential.helper= pull -q --rebase origin award-data || exit 1
           done
           exit 1
       - name: 更新快查頁
